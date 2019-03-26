@@ -3242,20 +3242,47 @@ __convert_names_and_types(
       return false;
     }
     PyTuple_SET_ITEM(pytuple, 0, pytopic_name);
-    PyObject * pytypes_list = PyList_New(topic_names_and_types.types[i].size);
+
+    size_t types_size = 0u;
+    rcutils_ret_t ret = rcutils_array_list_get_size(&topic_names_and_types.types[i], &types_size);
+    if (RCUTILS_RET_OK != ret) {
+      Py_DECREF(pytuple);
+      return false;
+    }
+
+    PyObject * pytypes_list = PyList_New(types_size);
     if (!pytypes_list) {
       Py_DECREF(pytuple);
       return false;
     }
     size_t j;
-    for (j = 0; j < topic_names_and_types.types[i].size; ++j) {
-      PyObject * pytopic_type = PyUnicode_FromString(topic_names_and_types.types[i].data[j]);
-      if (!pytopic_type) {
+    for (j = 0; j < types_size; ++j) {
+      rcutils_string_array_t type_name;
+      ret = rcutils_array_list_get(&topic_names_and_types.types[i], j, &type_name);
+      if (RCUTILS_RET_OK != ret) {
         Py_DECREF(pytuple);
         Py_DECREF(pytypes_list);
         return false;
       }
-      PyList_SET_ITEM(pytypes_list, j, pytopic_type);
+
+      PyObject * pytype_name = PyTuple_New(type_name.size);
+      if (!pytype_name) {
+        Py_DECREF(pytuple);
+        Py_DECREF(pytypes_list);
+        return false;
+      }
+      size_t k;
+      for (k = 0; k < type_name.size; ++k) {
+        PyObject * pytype_name_part = PyUnicode_FromString(type_name.data[k]);
+        if (!pytype_name_part) {
+          Py_DECREF(pytuple);
+          Py_DECREF(pytypes_list);
+          Py_DECREF(pytype_name);
+          return false;
+        }
+        PyTuple_SET_ITEM(pytype_name, k, pytype_name_part);
+      }
+      PyList_SET_ITEM(pytypes_list, j, pytype_name);
     }
     PyTuple_SET_ITEM(pytuple, 1, pytypes_list);
     PyList_SET_ITEM(pytopic_names_and_types, i, pytuple);
@@ -3484,53 +3511,15 @@ rclpy_get_topic_names_and_types(PyObject * Py_UNUSED(self), PyObject * args)
 
   PyObject * pytopic_names_and_types = PyList_New(topic_names_and_types.names.size);
   if (!pytopic_names_and_types) {
-    goto cleanup;
+    __cleanup_names_and_types(&topic_names_and_types);
+    return NULL;
   }
-  size_t i;
-  for (i = 0; i < topic_names_and_types.names.size; ++i) {
-    PyObject * pytuple = PyTuple_New(2);
-    if (!pytuple) {
-      goto cleanup;
-    }
-    PyObject * pytopic_name = PyUnicode_FromString(topic_names_and_types.names.data[i]);
-    if (!pytopic_name) {
-      Py_DECREF(pytuple);
-      goto cleanup;
-    }
-    PyTuple_SET_ITEM(pytuple, 0, pytopic_name);
-    PyObject * pytypes_list = PyList_New(topic_names_and_types.types[i].size);
-    if (!pytypes_list) {
-      Py_DECREF(pytuple);
-      goto cleanup;
-    }
-    size_t j;
-    for (j = 0; j < topic_names_and_types.types[i].size; ++j) {
-      PyObject * pytopic_type = PyUnicode_FromString(topic_names_and_types.types[i].data[j]);
-      if (!pytopic_type) {
-        Py_DECREF(pytuple);
-        Py_DECREF(pytypes_list);
-        goto cleanup;
-      }
-      PyList_SET_ITEM(pytypes_list, j, pytopic_type);
-    }
-    PyTuple_SET_ITEM(pytuple, 1, pytypes_list);
-    PyList_SET_ITEM(pytopic_names_and_types, i, pytuple);
-  }
-
-cleanup:
-  ret = rcl_names_and_types_fini(&topic_names_and_types);
-  if (PyErr_Occurred()) {
+  if (!__convert_names_and_types(topic_names_and_types, pytopic_names_and_types)) {
+    __cleanup_names_and_types(&topic_names_and_types);
     Py_XDECREF(pytopic_names_and_types);
     return NULL;
   }
-  if (ret != RCL_RET_OK) {
-    PyErr_Format(PyExc_RuntimeError,
-      "Failed to destroy topic_names_and_types: %s", rcl_get_error_string().str);
-    Py_DECREF(pytopic_names_and_types);
-    rcl_reset_error();
-    return NULL;
-  }
-
+  __cleanup_names_and_types(&topic_names_and_types);
   return pytopic_names_and_types;
 }
 
@@ -3570,54 +3559,15 @@ rclpy_get_service_names_and_types(PyObject * Py_UNUSED(self), PyObject * args)
 
   PyObject * pyservice_names_and_types = PyList_New(service_names_and_types.names.size);
   if (!pyservice_names_and_types) {
-    goto cleanup;
+    __cleanup_names_and_types(&service_names_and_types);
+    return NULL;
   }
-  size_t i;
-  for (i = 0; i < service_names_and_types.names.size; ++i) {
-    PyObject * pytuple = PyTuple_New(2);
-    if (!pytuple) {
-      goto cleanup;
-    }
-    PyObject * pyservice_name = PyUnicode_FromString(service_names_and_types.names.data[i]);
-    if (!pyservice_name) {
-      Py_DECREF(pytuple);
-      goto cleanup;
-    }
-    PyTuple_SET_ITEM(pytuple, 0, pyservice_name);
-    PyObject * pytypes_list = PyList_New(service_names_and_types.types[i].size);
-    if (!pytypes_list) {
-      Py_DECREF(pytuple);
-      goto cleanup;
-    }
-    size_t j;
-    for (j = 0; j < service_names_and_types.types[i].size; ++j) {
-      PyObject * pyservice_type = PyUnicode_FromString(service_names_and_types.types[i].data[j]);
-      if (!pyservice_type) {
-        Py_DECREF(pytuple);
-        Py_DECREF(pyservice_name);
-        Py_DECREF(pytypes_list);
-        goto cleanup;
-      }
-      PyList_SET_ITEM(pytypes_list, j, pyservice_type);
-    }
-    PyTuple_SET_ITEM(pytuple, 1, pytypes_list);
-    PyList_SET_ITEM(pyservice_names_and_types, i, pytuple);
-  }
-
-cleanup:
-  ret = rcl_names_and_types_fini(&service_names_and_types);
-  if (PyErr_Occurred()) {
+  if (!__convert_names_and_types(service_names_and_types, pyservice_names_and_types)) {
+    __cleanup_names_and_types(&service_names_and_types);
     Py_XDECREF(pyservice_names_and_types);
     return NULL;
   }
-  if (ret != RCL_RET_OK) {
-    PyErr_Format(PyExc_RuntimeError,
-      "Failed to destroy service_names_and_types: %s", rcl_get_error_string().str);
-    Py_DECREF(pyservice_names_and_types);
-    rcl_reset_error();
-    return NULL;
-  }
-
+  __cleanup_names_and_types(&service_names_and_types);
   return pyservice_names_and_types;
 }
 
